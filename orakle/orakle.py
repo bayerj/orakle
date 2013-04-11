@@ -43,7 +43,6 @@ def publish_arrays(socket, msg_class):
     while True:
         arr = (yield)
         msg = msg_class(0, arr)
-        print 'sending message %i' % msg.count
         socket.send(msg.tostring())
 
 
