@@ -2,11 +2,14 @@
 
 
 import contextlib
+import datetime
 import functools
 import itertools
+import json
 import struct
 import time
 
+import chopmunk
 import numpy as np
 import zmq
 
@@ -23,6 +26,14 @@ def coroutine(f):
     return started
 
 
+def log(info):
+    if isinstance(info, (str, unicode)):
+        info = {'message': info}
+    info['datetime'] = str(datetime.datetime.now())
+    logstring = json.dumps(chopmunk.replace_numpy_data(info))
+    print logstring
+
+
 @contextlib.contextmanager
 def durate(seconds):
     """ContextManager to make sure the block takes at least `seconds` seconds of
@@ -33,8 +44,9 @@ def durate(seconds):
     if elapsed < seconds:
         time.sleep(seconds - elapsed)
     else:
-        pass
-        # Maybe warn here.
+        log({'message': 'operation took too long',
+             'duration': elapsed,
+             'target duration': seconds})
 
 
 @coroutine
@@ -42,7 +54,11 @@ def publish_arrays(socket, msg_class):
     """Publish arrays encoded by `msg_class` to `socket`."""
     while True:
         arr = (yield)
-        msg = msg_class(0, arr)
+        if arr.size == 0:
+            msg = msg_class(1, arr)
+            log('received empty array, sending bad status message')
+        else:
+            msg = msg_class(0, arr)
         socket.send(msg.tostring())
 
 
@@ -51,8 +67,12 @@ def subscribe_to_arrays(socket, msg_class):
     """Yield arrays encoded by `msg_class` from `socket`."""
     (yield)
     while True:
-        msg = socket.recv()
-        yield msg_class.fromstring(msg).data
+        data = socket.recv()
+        msg = msg_class.fromstring(data)
+        if msg.status == 1:
+            log('received bad status message')
+            continue
+        yield msg.data
 
 
 def sync_sockets(sockets, msg_classes):
@@ -126,6 +146,9 @@ class ArrayMessage(object):
 
         if self.data.shape[1] != self.rowsize:
             raise ValueError('array wrongly shaped %s' % str(self.data.shape))
+
+        if self.data.size == 0:
+            raise ValueError('array is empty')
 
         self.count = self.ids.next() if count is None else count
 
