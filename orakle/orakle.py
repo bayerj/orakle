@@ -71,7 +71,7 @@ def subscribe_to_arrays(socket, msg_class):
         msg = msg_class.fromstring(data)
         if msg.status == 1:
             log('received bad status message')
-            continue
+            yield None
         yield msg.data
 
 
@@ -101,7 +101,8 @@ def sync_receive(sockets, msg_classes):
     """Receive from sockets in synchronization."""
     rcvrs = [subscribe_to_arrays(i, j) for i, j in zip(sockets, msg_classes)]
     for msgs in itertools.izip(*rcvrs):
-        yield msgs
+        if not None in msgs:
+            yield msgs
 
 
 class ArrayMessage(object):
