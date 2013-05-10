@@ -69,9 +69,10 @@ def subscribe_to_arrays(socket, msg_class):
     while True:
         data = socket.recv()
         msg = msg_class.fromstring(data)
-        if msg.status == 1:
+        if msg.status != 0:
             log('received bad status message')
             yield None
+            continue
         yield msg.data
 
 
