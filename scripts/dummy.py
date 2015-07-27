@@ -3,19 +3,21 @@
 """Usage:
     dummy.py serve --port=<p> --rowsize=<r> [--type=<t>] [--delay=<d>]
         [--amount-rows=<a>]
-    dummy.py listen --url=<u> --rowsize=<r> [--port=<p>]
-    dummy.py listen --url=<u> --rowsize=<r>
+        [--carrier=<c>]
+    dummy.py listen --host=<h> --port=<p> --rowsize=<r>  [--carrier=<c>]
 
 
 
 Options:
+    --host=<h>          Host to send to/listen to. [default: 127.0.0.1]
     --port=<p>          Port to serve on/ read from.
     --rowsize=<r>       Size of the rows of the messages.
     --delay=<d>         Delay between each message in seconds. [default: 0.01]
     --type=<t>          Type of data to send: 'zeros', 'incremental', 'random'
                         [default: zeros]
     --amount-rows=<a>   Amount of rows in each message. [default: 1]
-    --url=<u>           Address to listen at.
+    --carrier=<c>       Carrier to use, one of 'zeromq' or 'udp'.
+                        [default: zeromq]
 """
 
 
@@ -39,21 +41,27 @@ def main(args):
 def arrmsg_class(args):
     rowsize = int(args['--rowsize'])
     ArrMsg = type(
-        'DummyArrayMessage', (orakle.ArrayMessage,),
+        'DummyArrayMessage', (orakle.MicroArrayMessage,),
         {'rowsize': rowsize,
          'module': 1})
     return ArrMsg
 
 
 def listen(args):
-    ctx = zmq.Context()
-    url = '%(--url)s:%(--port)s' % args
-    print 'connecting to %s' % url
-
-    subscription = orakle.ZmqSubscription(
-        url=url, ctx=ctx, prefix='')
-
     ArrMsg = arrmsg_class(args)
+
+    if args['--carrier'] == 'zeromq':
+        ctx = zmq.Context()
+        url = '%(--host)s:%(--port)s' % args
+        print 'connecting to %s' % url
+        subscription = orakle.ZmqSubscription(
+            url=url, ctx=ctx, prefix='')
+    elif args['--carrier'] == 'udp':
+        print 'Listenting with udp at %(--host)s:%(--port)s' % args
+        subscription = orakle.UdpSubscription(
+            host=args['--host'], port=int(args['--port']),
+            msg_size=ArrMsg.header_length() + int(args['--rowsize']) * 4)
+
     arrs = orakle.subscribe_to_arrays(subscription, ArrMsg)
 
     orakle.sync_subscriptions([subscription], [ArrMsg])
@@ -65,8 +73,6 @@ def listen(args):
             sys.stdout.flush()
     except KeyboardInterrupt:
         return 1
-    except Exception, e:
-        raise e
     print ''
 
 
@@ -75,13 +81,17 @@ def serve(args):
     rowsize = int(args['--rowsize'])
     ArrMsg = arrmsg_class(args)
 
-    ctx = zmq.Context()
-    socket = ctx.socket(zmq.PUB)
-    url = 'tcp://*:%s' % args['--port']
-    print 'binding to %s' % url
-    socket.bind(url)
+    if args['--carrier'] == 'zeromq':
+        url = 'tcp://*:%s' % args['--port']
+        print 'binding with zeromq to %s' % url
+        publishment = orakle.ZmqPublishment(url=url)
+    elif args['--carrier'] == 'udp':
+        print 'binding with udp to %(--host)s:%(--port)s' % args
+        publishment = orakle.UdpPublishment(
+            args['--host'], int(args['--port']),
+            msg_size=ArrMsg.header_length() + rowsize * 4)
 
-    consumer = orakle.publish_arrays(socket, ArrMsg)
+    consumer = orakle.publish_arrays(publishment, ArrMsg)
 
     try:
         for i in itertools.count():

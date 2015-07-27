@@ -2,6 +2,7 @@
 
 
 import contextlib
+import socket
 import datetime
 import functools
 import itertools
@@ -147,6 +148,40 @@ class ZmqPublishment(object):
         self.socket.send(msg)
 
 
+class UdpSubscription(object):
+
+    def __init__(self, host, port, msg_size):
+        self.host = host
+        self.port = port
+        self.msg_size = msg_size
+
+        self.socket = socket.socket(
+            socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket.bind((self.host, self.port))
+
+    def receive(self, block=True):
+        self.socket.setblocking(1 if block else 0)
+        try:
+            data = self.socket.recv(self.msg_size)
+        except socket.error:
+            # Will only be raised if block is 0.
+            raise NoMessage()
+        return data
+
+
+class UdpPublishment(object):
+
+    def __init__(self, host, port, msg_size):
+        self.host = host
+        self.port = port
+        self.msg_size = msg_size
+
+        self.socket = socket.socket(
+            socket.AF_INET, socket.SOCK_DGRAM)
+
+    def send(self, msg):
+        self.socket.sendto(msg, (self.host, self.port))
+
 
 class ArrayMessage(object):
     """Class to represent arrays send over a network.
@@ -204,9 +239,13 @@ class ArrayMessage(object):
         return header + self.data.tostring()
 
     @classmethod
+    def header_length(cls):
+        return struct.calcsize(cls.header_format)
+
+    @classmethod
     def fromstring(cls, string):
         """Return an ArrayMessage object decoded from the given string."""
-        header_length = struct.calcsize(cls.header_format)
+        header_length = cls.header_length()
         header, data = string[:header_length], string[header_length:]
         _, count, status, rowsize, n_rows = struct.unpack(
             cls.header_format, header)
@@ -243,3 +282,26 @@ class ArrayMessage(object):
             msg = cls.fromstring(pkg)
             msgs.append(msg)
         return msgs
+
+
+class MicroArrayMessage(ArrayMessage):
+
+    startup_time = time.time()
+    header_format = '<Bf'
+
+    def tostring(self):
+        """Return a string representing the current message."""
+
+        header = struct.pack(
+            self.header_format, self.status, time.time() - self.startup_time)
+        return header + self.data.tostring()
+
+    @classmethod
+    def fromstring(cls, string):
+        """Return an ArrayMessage object decoded from the given string."""
+        header_length = cls.header_length()
+        header, data = string[:header_length], string[header_length:]
+        status, timestamp = struct.unpack(cls.header_format, header)
+        arr = np.fromstring(data, dtype='float32')
+        arr.shape = 1, cls.rowsize
+        return cls(status, arr, timestamp)
