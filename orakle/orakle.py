@@ -50,8 +50,8 @@ def durate(seconds):
 
 
 @coroutine
-def publish_arrays(socket, msg_class):
-    """Publish arrays encoded by `msg_class` to `socket`."""
+def publish_arrays(publishment, msg_class):
+    """Publish arrays encoded by `msg_class` to `publishment`."""
     while True:
         arr = (yield)
         if arr.size == 0:
@@ -59,15 +59,15 @@ def publish_arrays(socket, msg_class):
             log('received empty array, sending bad status message')
         else:
             msg = msg_class(0, arr)
-        socket.send(msg.tostring())
+        publishment.send(msg.tostring())
 
 
 @coroutine
-def subscribe_to_arrays(socket, msg_class):
-    """Yield arrays encoded by `msg_class` from `socket`."""
+def subscribe_to_arrays(subscription, msg_class):
+    """Yield arrays encoded by `msg_class` from `subscription`."""
     (yield)
     while True:
-        data = socket.recv()
+        data = subscription.receive()
         msg = msg_class.fromstring(data)
         if msg.status != 0:
             log('received bad status message')
@@ -76,34 +76,76 @@ def subscribe_to_arrays(socket, msg_class):
         yield msg.data
 
 
-def sync_sockets(sockets, msg_classes):
-    """Receive messages given by `msg_classes` published at `sockets` until all
-    sources are somewhat in sync."""
-    assert len(sockets) == len(msg_classes)
+def sync_subscriptions(subscriptions, msg_classes):
+    """Receive messages given by `msg_classes` published at `subscriptions`
+    until all sources are somewhat in sync."""
+    assert len(subscriptions) == len(msg_classes)
 
-    # Wait until all sockets are sending.
-    for socket in sockets:
-        socket.recv()
+    # Wait until all subscription are sending.
+    for subscription in subscriptions:
+        subscription.receive()
 
-    # Loop through all sockets until no socket has a message pending.
+    # Loop through all subscription until no subscription has a message pending.
     while True:
         received_sth = False
-        for socket in sockets:
+        for subscription in subscriptions:
             try:
-                socket.recv(zmq.NOBLOCK)
-            except zmq.ZMQError:
+                subscription.receive(block=False)
+            except NoMessage:
                 continue
             received_sth = True
         if not received_sth:
             break
 
 
-def sync_receive(sockets, msg_classes):
-    """Receive from sockets in synchronization."""
-    rcvrs = [subscribe_to_arrays(i, j) for i, j in zip(sockets, msg_classes)]
+def sync_receive(subscriptions, msg_classes):
+    """Receive from subscribers in synchronization."""
+    rcvrs = [subscribe_to_arrays(i, j)
+             for i, j in zip(subscriptions, msg_classes)]
     for msgs in itertools.izip(*rcvrs):
-        if not None in msgs:
+        if None not in msgs:
             yield msgs
+
+
+class NoMessage(Exception):
+    pass
+
+
+class ZmqSubscription(object):
+
+    def __init__(self, url, ctx=None, prefix=''):
+        self.url = url
+        self.ctx = ctx if ctx is not None else zmq.Context()
+        self.prefix = prefix
+
+        self.socket = self.ctx.socket(zmq.SUB)
+        self.socket.setsockopt(zmq.SUBSCRIBE, prefix)
+        self.socket.connect(url)
+
+    def receive(self, block=True):
+        if block:
+            msg = self.socket.recv()
+        else:
+            try:
+                msg = self.socket.recv(zmq.NOBLOCK)
+            except zmq.ZMQError:
+                raise NoMessage()
+        return msg
+
+
+class ZmqPublishment(object):
+
+    def __init__(self, url, ctx=None, prefix=''):
+        self.url = url
+        self.ctx = ctx if ctx is not None else zmq.Context()
+        self.prefix = prefix
+
+        self.socket = self.ctx.socket(zmq.PUB)
+        self.socket.bind(url)
+
+    def send(self, msg):
+        self.socket.send(msg)
+
 
 
 class ArrayMessage(object):
@@ -173,30 +215,30 @@ class ArrayMessage(object):
         return cls(status, arr, count)
 
     @classmethod
-    def lastfromsocket(cls, socket):
-        """Yield messages from the given socket until no more messages are
+    def last_from_subscriber(cls, subscriber):
+        """Yield messages from the given subscriber until no more messages are
         available."""
         msg = None
         while True:
             try:
-                msg = socket.recv(zmq.NOBLOCK)
-            except zmq.ZMQError:
+                msg = subscriber.receive(block=False)
+            except NoMessage:
                 if msg is None:
                     # We have not yet gotten a message and thus
                     # have to wait.
-                    msg = socket.recv()
+                    msg = subscriber.receive()
                 continue
             yield cls.fromstring(msg)
 
     @classmethod
-    def emptysocket(cls, socket):
-        """Receive all messages from the given socket and return them as a
+    def empty_subscriber(cls, subscriber):
+        """Receive all messages from the given subscriber and return them as a
         list."""
         msgs = []
         while True:
             try:
-                pkg = socket.recv(zmq.NOBLOCK)
-            except zmq.ZMQError:
+                pkg = subscriber.receive(block=False)
+            except NoMessage:
                 break
             msg = cls.fromstring(pkg)
             msgs.append(msg)

@@ -47,15 +47,16 @@ def arrmsg_class(args):
 
 def listen(args):
     ctx = zmq.Context()
-    socket = ctx.socket(zmq.SUB)
-    socket.setsockopt(zmq.SUBSCRIBE, "")
     url = '%(--url)s:%(--port)s' % args
     print 'connecting to %s' % url
-    socket.connect(url)
-    ArrMsg = arrmsg_class(args)
-    arrs = orakle.subscribe_to_arrays(socket, ArrMsg)
 
-    orakle.sync_sockets([socket], [ArrMsg])
+    subscription = orakle.ZmqSubscription(
+        url=url, ctx=ctx, prefix='')
+
+    ArrMsg = arrmsg_class(args)
+    arrs = orakle.subscribe_to_arrays(subscription, ArrMsg)
+
+    orakle.sync_subscriptions([subscription], [ArrMsg])
     print 'synced'
 
     try:
