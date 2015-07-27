@@ -19,6 +19,7 @@ Options:
 """
 
 
+import itertools
 import sys
 
 import docopt
@@ -57,8 +58,15 @@ def listen(args):
     orakle.sync_sockets([socket], [ArrMsg])
     print 'synced'
 
-    for arr in arrs:
-        print arr.shape
+    try:
+        for i, arr in enumerate(arrs):
+            print '%i messages received \r' % i,
+            sys.stdout.flush()
+    except KeyboardInterrupt:
+        return 1
+    except Exception, e:
+        raise e
+    print ''
 
 
 def serve(args):
@@ -75,15 +83,17 @@ def serve(args):
     consumer = orakle.publish_arrays(socket, ArrMsg)
 
     try:
-        while True:
-            with orakle.durate(int(args['--delay'])):
+        for i in itertools.count():
+            with orakle.durate(float(args['--delay'])):
                 data = np.random.random((n_cols, rowsize))
                 consumer.send(data)
-                print '.'
+                print '%i messages sent \r' % i,
+                sys.stdout.flush()
     except KeyboardInterrupt:
         return 1
     except Exception, e:
         raise e
+    print ''
 
 
 if __name__ == '__main__':
