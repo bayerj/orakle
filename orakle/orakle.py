@@ -263,7 +263,12 @@ class ArrayMessage(object):
         _, count, status, rowsize, n_rows = struct.unpack(
             cls.header_format, header)
         arr = np.fromstring(data, dtype='float64')
-        arr.shape = arr.shape[0] / cls.rowsize, cls.rowsize
+        try:
+            arr.shape = arr.shape[0] / cls.rowsize, cls.rowsize
+        except ValueError, e:
+            print arr.shape, '-->', arr.shape[0] / cls.rowsize, cls.rowsize
+            raise e
+
         return cls(status, arr, count)
 
     @classmethod
@@ -300,7 +305,8 @@ class ArrayMessage(object):
 class MicroArrayMessage(ArrayMessage):
 
     startup_time = time.time()
-    header_format = '<Bf'
+    header_format = '<Bd'
+    dtype = 'float32'
 
     def tostring(self):
         """Return a string representing the current message."""
@@ -315,6 +321,14 @@ class MicroArrayMessage(ArrayMessage):
         header_length = cls.header_length()
         header, data = string[:header_length], string[header_length:]
         status, timestamp = struct.unpack(cls.header_format, header)
-        arr = np.fromstring(data, dtype='float32')
+        try:
+            arr = np.fromstring(data, dtype=cls.dtype)
+        except ValueError, e:
+            print len(data)
+            raise e
+        if not arr.size == cls.rowsize:
+            raise ValueError(
+                'size of received message and expected message do not agree: '
+                '%i <-> %i' % (arr.size, cls.rowsize))
         arr.shape = 1, cls.rowsize
         return cls(status, arr, timestamp)
