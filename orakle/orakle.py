@@ -232,13 +232,14 @@ class ArrayMessage(object):
     def __init__(self, status, data, count=None):
         self.status = status
         self.data = data
-        if self.data.ndim == 1:
+        if self.data is None:
+            self.data = np.empty((1, self.rowsize))
+        elif self.data.ndim == 1:
             self.data = self.data.reshape((1, self.data.shape[0]))
 
-        if self.data.shape[1] != self.rowsize:
+        elif self.data.shape[1] != self.rowsize:
             raise ValueError('array wrongly shaped %s' % str(self.data.shape))
-
-        if self.data.size == 0:
+        elif self.data.size == 0:
             raise ValueError('array is empty')
 
         self.count = self.ids.next() if count is None else count
