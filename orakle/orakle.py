@@ -64,11 +64,15 @@ def publish_arrays(publishment, msg_class):
 
 
 @coroutine
-def subscribe_to_arrays(subscription, msg_class):
+def subscribe_to_arrays(subscription, msg_class, timeout=None):
     """Yield arrays encoded by `msg_class` from `subscription`."""
     (yield)
     while True:
-        data = subscription.receive()
+        try:
+            data = subscription.receive(True, timeout)
+        except NoMessage as e:
+            raise StopIteration('other side has timed out')
+
         msg = msg_class.fromstring(data)
         if msg.status != 0:
             log('received bad status message')
@@ -123,7 +127,11 @@ class ZmqSubscription(object):
         self.socket.setsockopt(zmq.SUBSCRIBE, prefix)
         self.socket.connect(url)
 
-    def receive(self, block=True):
+    def receive(self, block=True, timeout=None):
+        if timeout is not None:
+            raise NotImplementedError('timeout for ZmqSubscription.receive not '
+                                      'implemented')
+
         if block:
             msg = self.socket.recv()
         else:
@@ -159,12 +167,16 @@ class UdpSubscription(object):
             socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind((self.host, self.port))
 
-    def receive(self, block=True):
-        self.socket.setblocking(1 if block else 0)
+    def receive(self, block=True, timeout=None):
+        if timeout is not None:
+            self.socket.settimeout(timeout)
+        else:
+            self.socket.setblocking(1 if block else 0)
+
         try:
             data = self.socket.recv(self.msg_size)
-        except socket.error:
-            # Will only be raised if block is 0.
+        except socket.error as e:
+            # Will only be raised if block is 0 OR 1 and there is a time out.
             raise NoMessage()
         return data
 
