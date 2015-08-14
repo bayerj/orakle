@@ -15,6 +15,10 @@ import numpy as np
 import zmq
 
 
+BAD_STATUS = 0
+GOOD_STATUS = 1
+
+
 def coroutine(f):
     """Turn a generator function into a coroutine by calling .next() once."""
 
@@ -55,11 +59,11 @@ def publish_arrays(publishment, msg_class):
     """Publish arrays encoded by `msg_class` to `publishment`."""
     while True:
         arr = (yield)
-        if arr.size == 0:
-            msg = msg_class(1, arr)
-            log('received empty array, sending bad status message')
+        if arr is None or arr.size == 0:
+            msg = msg_class(BAD_STATUS, arr)
+            log('tried to send empty, sending bad status message')
         else:
-            msg = msg_class(0, arr)
+            msg = msg_class(GOOD_STATUS, arr)
         publishment.send(msg.tostring())
 
 
@@ -74,7 +78,7 @@ def subscribe_to_arrays(subscription, msg_class, timeout=None):
             raise StopIteration('other side has timed out')
 
         msg = msg_class.fromstring(data)
-        if msg.status != 0:
+        if msg.status == BAD_STATUS:
             log('received bad status message')
             yield None
             continue
@@ -228,6 +232,7 @@ class ArrayMessage(object):
 
     header_format = '<BIBBI'
     ids = itertools.count(0)
+    dtype = 'float64'
 
     def __init__(self, status, data, count=None):
         self.status = status
@@ -262,7 +267,7 @@ class ArrayMessage(object):
         header, data = string[:header_length], string[header_length:]
         _, count, status, rowsize, n_rows = struct.unpack(
             cls.header_format, header)
-        arr = np.fromstring(data, dtype='float64')
+        arr = np.fromstring(data, dtype=self.dtype)
         try:
             arr.shape = arr.shape[0] / cls.rowsize, cls.rowsize
         except ValueError, e:
